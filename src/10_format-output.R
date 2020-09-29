@@ -486,14 +486,18 @@ ggplot(data = c_plot, aes(y=percent_r, x=Tot_redn_pct, ymin=percent_r.lower, yma
 ggsave(paste0('data/results/compareper_',uncer,'.png'),scale=1.2,width=4,height=4)   
 
 #compare to DLM  2016 absolute reduction ----
-ggplot(data = c_plot, aes(y=reduction/(1000*1000), x=Tot_redn_m3/1000, ymin=reduction.lower/(1000*1000), ymax=reduction.upper/(1000*1000))) +
+ccplot <- c_plot %>%
+  dplyr::select(reduction,reduction.lower,reduction.upper,Tot_redn_m3) %>%
+  mutate(ym=(reduction/(1000*1000))/1000,yl=(reduction.lower/(1000*1000))/1000,yu=(reduction.upper/(1000*1000))/1000,dlm=Tot_redn_m3/(1000*1000))
+
+ggplot(data = ccplot, aes(y=ym, x=dlm, ymin=yl, ymax=yu)) +
   geom_point(alpha=0.3) +
   geom_abline(slope=1, intercept=0) +
   geom_linerange(alpha=0.5) +
   labs(title ='') +
-  xlab('This study') +
-  ylab('Moncrieff et al 2019') +
-  coord_cartesian(ylim = c(0,12000),xlim=c(0,12000)) +
+  xlab('le Maitre et al 2016 (gigalitres)') +
+  ylab('This study (gigalitres)') +
+  coord_cartesian(ylim = c(0,12),xlim=c(0,12)) +
   theme_bw()
 
 ggsave(paste0('data/results/compareabs_ff_lin_',uncer,'.png'),height=4,width=4,scale=1.2)                  
@@ -601,7 +605,34 @@ P <-ggplot(catchdat) +
 
 P
 ggsave('data/results/catch_top3_uncer.png',height=5,width=6.5,scale=2)         
-#compare pixels undertainty source ----
+#compare pixels undertainty total ----
+pix_file <- list.files('data/spatial/','*_mad',full.names=T)
+pstack <- stack(pix_file)#2 = water
+names(pstack) <- c("All","Additional water","Rainfall","Curve shape","Invasive density","Curve assignment","Age")
+pstack <- pstack^2
+psum <- cellStats(pstack,stat='sum',na.rm=T)
+psum <- as.data.frame(psum)
+psum$name <- rownames(psum)
+psum$psum <- sqrt(psum$psum)/max(sqrt(psum$psum))
+psum$psum <- psum$psum*100
+
+
+ggdotchart(psum, x = "name", y = "psum",
+           xlab= "",ylab ="Percent of uncertainty",
+           color = "skyblue",                                # Color by groups
+           sorting = "descending",                       # Sort value in descending order
+           add = "segments",                             # Add segments from y = 0 to dots
+           rotate = TRUE,                                # Rotate vertically
+           dot.size = 10,                                 # Large dot size
+           label = round(psum$psum),                        # Add mpg values as dot labels
+           font.label = list(color = "black", size = 9, 
+                             vjust = 0.5),               # Adjust label parameters
+           ggtheme = theme_pubr()                        # ggplot2 theme
+)
+
+
+ggsave('data/results/compare_uncer_pix.png',height=5,width=6.5,scale=1)         
+
 # tables ----
 #stan
 library(rstan)
@@ -614,33 +645,27 @@ log_lik_1 <- extract_log_lik(fit1, merge_chains = FALSE)
 log_lik_2 <- extract_log_lik(fit2, merge_chains = FALSE)
 log_lik_3 <- extract_log_lik(fit3, merge_chains = FALSE)
 log_lik_4 <- extract_log_lik(fit4, merge_chains = FALSE)
-log_lik_5 <- extract_log_lik(fit5, merge_chains = FALSE)
-#log_lik_6 <- extract_log_lik(fit6, merge_chains = FALSE)
-#log_lik_7 <- extract_log_lik(fit7, merge_chains = FALSE)
 
 r_eff1 <- relative_eff(exp(log_lik_1), cores = 2)
 r_eff2 <- relative_eff(exp(log_lik_2), cores = 2)
 r_eff3 <- relative_eff(exp(log_lik_3), cores = 2)
 r_eff4 <- relative_eff(exp(log_lik_4), cores = 2)
-r_eff5 <- relative_eff(exp(log_lik_5), cores = 2)
-#r_eff6 <- relative_eff(exp(log_lik_6), cores = 2)
-#r_eff7 <- relative_eff(exp(log_lik_7), cores = 2)
 
 loo_1 <- loo(log_lik_1, r_eff = r_eff1, cores = 2)
 loo_2 <- loo(log_lik_2, r_eff = r_eff2, cores = 2)
 loo_3 <- loo(log_lik_3, r_eff = r_eff3, cores = 2)
 loo_4 <- loo(log_lik_4, r_eff = r_eff4, cores = 2)
-loo_5 <- loo(log_lik_5, r_eff = r_eff5, cores = 2)
-#loo_6 <- loo(log_lik_6, r_eff = r_eff6, cores = 2)
-#loo_7 <- loo(log_lik_7, r_eff = r_eff7, cores = 2)
 
-comp <- as.data.frame(loo_compare(loo_1, loo_2,loo_3,loo_4,loo_5))#,loo_6,loo_7))
+
+comp <- as.data.frame(loo_compare(loo_1, loo_2,loo_3,loo_4))
+comp$mname <- row.names(comp)
+comp <- comp[order(comp$mname),]
 modelnames <- c("Age + Condition + Species + Age|Condition",
                 "Age + Condition + Species",
                 "Age + Condition + Species + Age|Species",
-                "Age + Condition + Species + Age|Condition + Age|Species",
-                "Age + Condition + Species + Age|Condition|Species")
+                "Age + Condition + Species + Age|Condition + Age|Species")
 comp$Name <- modelnames
+comp <- comp[order(comp$looic),]
 comp$LOOIC <- comp$looic
 comp <- comp %>%
   dplyr::select(Name,LOOIC)
