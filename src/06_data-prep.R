@@ -75,40 +75,28 @@ if(!file.exists("data/output/gwater.tif")){
 }
 
 #pixel age (wilson 2010) ----
-if(!file.exists("data/output/rt_i.tif")){
-  rtm  <- raster('data/output/rtm.tif')
-  rtsd  <- raster('data/output/rtsd.tif')
-  rtm <- projectRaster(rtm,index,method='ngb')
-  rtsd <- projectRaster(rtsd,index,method='ngb')
+if(!file.exists("data/output/index_all")){
+  load("data/output/age_raster_stack.RData")
+  #first create wgs84 points
+  index_sp <- st_as_sf(x = index_df[,1:2], 
+                          coords = c("x", "y"),
+                          crs = '+proj=aea +lat_1=-18 +lat_2=-32 +lat_0=0 +lon_0=24 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs +ellps=WGS84 +towgs84=0,0,0')
+  index_sp <- st_transform(index_sp, "+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs")
+  index_sp <- unlist(st_geometry(index_sp)) %>% 
+    matrix(ncol=2,byrow=TRUE) %>% 
+    as_tibble() %>% 
+    setNames(c("lon","lat"))
   
-  #sample to same grid and interpolate to fill a few gaps
-  rtmi  <- resample(rtm,index,filename = 'data/temp/rtm_r.tif',method='ngb',overwrite=TRUE)
-  rtmi <- focal(rtmi, w=matrix(1,nrow=5, ncol=5), fun=mean, NAonly=TRUE, na.rm=TRUE) 
-  rtmi <- focal(rtmi, w=matrix(1,nrow=5, ncol=5), fun=mean, NAonly=TRUE, na.rm=TRUE) 
-  rtmi <- focal(rtmi, w=matrix(1,nrow=5, ncol=5), fun=mean, NAonly=TRUE, na.rm=TRUE) 
-  rtmi <- focal(rtmi, w=matrix(1,nrow=5, ncol=5), fun=mean, NAonly=TRUE, na.rm=TRUE) 
-  rtmi <- focal(rtmi, w=matrix(1,nrow=5, ncol=5), fun=mean, NAonly=TRUE, na.rm=TRUE) 
-  rtmi <- focal(rtmi, w=matrix(1,nrow=5, ncol=5), fun=mean, NAonly=TRUE, na.rm=TRUE) 
+  #get the cell numbers
+  cell <- cellFromXY(all_grid,as.matrix(index_sp))
+  cell <- data.frame(age_cell=cell)
   
-  rtsdi  <- resample(rtsd,index,filename = 'data/temp/rtsd_r.tif',method='ngb',overwrite=TRUE)
-  rtsdi <- focal(rtsdi, w=matrix(1,nrow=5, ncol=5), fun=mean, NAonly=TRUE, na.rm=TRUE) 
-  rtsdi <- focal(rtsdi, w=matrix(1,nrow=5, ncol=5), fun=mean, NAonly=TRUE, na.rm=TRUE) 
-  rtsdi <- focal(rtsdi, w=matrix(1,nrow=5, ncol=5), fun=mean, NAonly=TRUE, na.rm=TRUE) 
-  rtsdi <- focal(rtsdi, w=matrix(1,nrow=5, ncol=5), fun=mean, NAonly=TRUE, na.rm=TRUE) 
-  rtsdi <- focal(rtsdi, w=matrix(1,nrow=5, ncol=5), fun=mean, NAonly=TRUE, na.rm=TRUE) 
-  rtsdi <- focal(rtsdi, w=matrix(1,nrow=5, ncol=5), fun=mean, NAonly=TRUE, na.rm=TRUE) 
-  
-  writeRaster(rtmi,"data/output/rtm_i.tif",overwrite=T)
-  writeRaster(rtsdi,"data/output/rtsd_i.tif",overwrite=T)
-} else {
-  rtmi <- raster("data/output/rtm_i.tif")
-  rtsdi <- raster("data/output/rtsd_i.tif")
-  
-  ages <-stack(rtmi,rtsdi)
-index_df <- read_feather('data/output/index.feather')
-ages <- raster::extract(ages,index_df[,1:2],cellnumbers=TRUE,df=TRUE)
-test<-left_join(sp_data_long,ages,by='cells')
-
+  #update indexdf
+  index_all <-cbind(index_df,index_sp,cell)
+  write_feather(index_all,'data/output/index_all.feather')
+} else
+{
+  index_all <- read_feather('data/output/index_all.feather')
 }
 
 # adam wilson climate ----
@@ -207,20 +195,24 @@ if(!file.exists("data/output/niaps_long.feather")){
 
 if(!file.exists('data/output/pixel_ras.grd')){
   #for  extracting individual pixels
-  pixel_ras <- stack(catchnq,subcatchnq,gwater,river10,river20,mapi,mapsdi,rtmi,rtsdi)
+  pixel_ras <- stack(catchnq,gwater,river10,river20,mapi,mapsdi)
   pixel_ras <- trim(pixel_ras)
   writeRaster(pixel_ras,"data/output/pixel_ras.grd", format="raster")
 }
 
 if(!file.exists('data/output/sp_data_long.feather')){
   
-  all_ras <- stack(niaps,catchnq,subcatchnq,gwater,river10,river20,mapi,mapsdi,rtmi,rtsdi)
+  all_ras <- stack(niaps,catchnq,gwater,river10,river20,mapi,mapsdi)
   all_ras <- trim(all_ras)
   
   #extract
-  sp_data <- raster::extract(all_ras,index_df[,1:2],cellnumbers=TRUE,df=TRUE)
+  sp_data <- raster::extract(all_ras,index_all[,1:2],cellnumbers=TRUE,df=TRUE)
   sp_data <- sp_data %>%
     filter(catch_num != 0)
+  
+  #add geography
+  sp_data <-sp_data %>%
+    left_join(index_all,by='cells')
   
   #spatial data with niaps
   sp_data_long <- sp_data %>%
@@ -233,12 +225,12 @@ if(!file.exists('data/output/sp_data_long.feather')){
     dplyr::rename('niaps_hmu' = 'niaps_sp','QNUM' = 'catch_num') %>%
     left_join(catch_df,by='QNUM')
   
-  write_feather(sp_data_long,'data/output/sp_data_long.feather')
-  write_feather(sp_data_short,'data/output/sp_data_short.feather')
+  write_feather(sp_data_long,'data/output/sp_data__r1_long.feather')
+  write_feather(sp_data_short,'data/output/sp_data__r1_short.feather')
 
 } else {
-  sp_data_long <- read_feather('data/output/sp_data_long.feather')
-  sp_data_short <- read_feather('data/output/sp_data_short.feather')
+  sp_data_long <- read_feather('data/output/sp_data__r1_long.feather')
+  sp_data_short <- read_feather('data/output/sp_data__r1_short.feather')
 }
   
 
