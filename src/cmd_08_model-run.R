@@ -1,3 +1,5 @@
+#!/usr/bin/env Rscript
+
 library(dplyr)
 library(tidyr)
 library(tibble)
@@ -12,8 +14,8 @@ library(mixdist)
 setwd("/home/rstudio/streamflow")
 
 #choose uncertainty to unfreeze
-#uncer <- commandArgs(trailingOnly=TRUE)
-uncer <- 0
+uncer <- commandArgs(trailingOnly=TRUE)
+#uncer <- 0
 
 uncer <- as.numeric(uncer)
 

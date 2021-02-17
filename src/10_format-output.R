@@ -122,10 +122,7 @@ catchments <- read_feather('data/output/catchments.feather')
 index <- raster('data/temp/template_temp.tif')
 crs_index <- crs(index)
 indexdf <- read_feather('data/output/index.feather')
-sp_data <- read_feather('data/output/sp_data_long2.feather') %>%
-  rename("ID"="ID.x") %>%
-  dplyr::select(c('ID','cells')) %>%
-  left_join(indexdf,by='cells')
+sp_data <- read_feather('data/output/sp_data_r1_short.feather')
 
 #create rasters from raw output ----
 
@@ -189,6 +186,47 @@ c_j<-c_all %>%
   dplyr::select(c('QUATERNARY','QNUM'))
 
 c_final_number <- tbl_all %>% 
+  group_by(SAMP) %>%
+  summarise(tred = sum(reduction),tnat=sum(natural)) %>%
+  mutate(tred = tred/1000000,tnat = tnat/1000000,tper = (tred/tnat)*100) %>%
+  summarise(lower_r = quantile(tred,c(0.025)),
+            upper_r = quantile(tred,c(0.975)),
+            mean_r = mean(tred),
+            upper_p = quantile(tper,c(0.025)),
+            lower_p = quantile(tper,c(0.975)),
+            mean_p = mean(tper))
+#catchment summaries no variation ----
+
+tbl1 <- read_feather(paste0('data/results/catch_summmary_1.feather')) %>%
+  dplyr::select(-SAMP) %>% 
+  mutate(actual = RUNSUM-REDSUM,percent_r = (REDSUM/RUNSUM)*100) %>%
+  rename(natural=RUNSUM,reduction=REDSUM)
+
+tbl_all1 <- read_feather(paste0('data/results/catch_summmary_1.feather')) %>%
+  mutate(actual = RUNSUM-REDSUM,percent_r = (REDSUM/RUNSUM)*100) %>%
+  rename(natural=RUNSUM,reduction=REDSUM)
+
+c_summary1 <- tbl1 %>% 
+  group_by(QNUM) %>%
+  mean_qi()
+
+c_all1 <- c_summary1 %>%
+  left_join(catch_j, by ='QNUM') %>%
+  left_join(catch_sp, by = 'QUATERNARY') %>%
+  left_join(dave_dat, by = 'QUATERNARY')
+
+c_summary_sp1 <- catch_sp %>%
+  left_join(catch_j) %>% 
+  left_join(c_summary1) %>%
+  left_join(dave_dat)
+
+c_plot1 <- c_all1 %>%
+  filter(.width==0.95)
+
+c_j1<-c_all1 %>%
+  dplyr::select(c('QUATERNARY','QNUM'))
+
+c_final_number1 <- tbl_all1 %>% 
   group_by(SAMP) %>%
   summarise(tred = sum(reduction),tnat=sum(natural)) %>%
   mutate(tred = tred/1000000,tnat = tnat/1000000,tper = (tred/tnat)*100) %>%
@@ -293,7 +331,8 @@ c_mad_plot <- c_summary_sp %>%
 #check that all catchments have some naisp data
 #nmask <- niaps>0
 #ncounbt <- extract(nmask, c_summary_sp, fun=sum, na.rm=TRUE, df=TRUE)
-
+cc <- c_sum_plot %>%
+  filter(!is.na(geometry))
 options(scipen=999)
 theme_set(theme_bw())
 P<-ggplot(c_sum_plot) + 
@@ -452,7 +491,7 @@ ggsave(paste0('data/results/pixel_mad_ff_',uncer,'.png'),plot=P,width=5,height=3
 
 #Pixels: cape fold zoom ----
 dam<-read_sf('data/raw/dams500g')
-  
+
 dam_ras<-fasterize::fasterize(dam,Mean2)
 r5 <- mask(Reduction4,dam_ras,inverse=TRUE)
 
@@ -490,24 +529,52 @@ ccplot <- c_plot %>%
   dplyr::select(reduction,reduction.lower,reduction.upper,Tot_redn_m3) %>%
   mutate(ym=(reduction/(1000*1000))/1000,yl=(reduction.lower/(1000*1000))/1000,yu=(reduction.upper/(1000*1000))/1000,dlm=Tot_redn_m3/(1000*1000))
 
+#summary(lm(ccplot$ym ~ ccplot$dlm))
 ggplot(data = ccplot, aes(y=ym, x=dlm, ymin=yl, ymax=yu)) +
   geom_point(alpha=0.3) +
   geom_abline(slope=1, intercept=0) +
   geom_linerange(alpha=0.5) +
+  geom_smooth(method='lm',se=F,color='black',lwd=0.5,linetype=2) +
   labs(title ='') +
-  xlab('le Maitre et al 2016 (gigalitres)') +
-  ylab('This study (gigalitres)') +
+  xlab('le Maitre et al 2016 (million m3)') +
+  ylab('This study (million m3)') +
   coord_cartesian(ylim = c(0,12),xlim=c(0,12)) +
   theme_bw()
 
 ggsave(paste0('data/results/compareabs_ff_lin_',uncer,'.png'),height=4,width=4,scale=1.2)                  
+ggsave(paste0('data/results/compareabs_ff_lin_',uncer,'.eps'),device=cairo_ps, fallback_resolution = 300,height=4,width=4,scale=1.2)                  
 
 #calc r2
 r2 <- c_plot %>%
   dplyr::select(m=reduction, d=Tot_redn_m3) %>%
   mutate(m=m/(1000*1000),d=d/1000)
 cor(r2$m,r2$d)
-  
+#compare to just using mean ----
+ccplot <- c_plot %>%
+  dplyr::select(reduction,reduction.lower,reduction.upper,Tot_redn_m3) %>%
+  mutate(ym=(reduction/(1000*1000))/1000,yl=(reduction.lower/(1000*1000))/1000,yu=(reduction.upper/(1000*1000))/1000,dlm=Tot_redn_m3/(1000*1000))
+ccplot1 <- c_plot1 %>%
+  dplyr::select(reduction,reduction.lower,reduction.upper,Tot_redn_m3) %>%
+  mutate(ym=(reduction/(1000*1000))/1000,yl=(reduction.lower/(1000*1000))/1000,yu=(reduction.upper/(1000*1000))/1000,dlm=Tot_redn_m3/(1000*1000))
+ccplot$mean_red_abs <- ccplot1$ym
+#summary(lm(ccplot$ym ~ ccplot$dlm))
+ggplot(data = ccplot, aes(y=ym, x=mean_red_abs, ymin=yl, ymax=yu)) +
+  geom_point(alpha=0.3) +
+  geom_abline(slope=1, intercept=0) +
+  geom_linerange(alpha=0.5) +
+  geom_smooth(method='lm',se=F,color='black',lwd=0.5,linetype=2) +
+  labs(title ='') +
+  xlab('without uncertainty (million m3)') +
+  ylab('with uncertatinty (million m3)') +
+  coord_cartesian(ylim = c(0,12),xlim=c(0,12)) +
+  theme_bw()
+
+ggsave(paste0('data/results/compareabs_jenson.png'),height=4,width=4,scale=1.2)                  
+ggsave(paste0('data/results/compareabs_jenson.eps'),device=cairo_ps, fallback_resolution = 300,height=4,width=4,scale=1.2)                  
+
+#calc r2
+summary(lm(ccplot$ym~ccplot$mean_red_abs))
+
 #create plot comparing uncer scenarios ----
 
 runs <- c(0,2,3,4,6,7,8)
@@ -517,12 +584,12 @@ for (i in runs) {
     dplyr::select(-SAMP) %>% 
     mutate(actual = RUNSUM-REDSUM,percent_r = (REDSUM/RUNSUM)*100) %>%
     rename(natural=RUNSUM,reduction=REDSUM)
-
-    c_mad <- tbl %>% 
-      group_by(QNUM) %>%
-      summarise(mad = mad(reduction),med = median(reduction)) %>%
-      mutate(mcv = mad/med, scen = uncer)
-    write_feather(c_mad,paste0('data/results/scen_uncer_',uncer,'.feather'))
+  
+  c_mad <- tbl %>% 
+    group_by(QNUM) %>%
+    summarise(mad = mad(reduction),med = median(reduction)) %>%
+    mutate(mcv = mad/med, scen = uncer)
+  write_feather(c_mad,paste0('data/results/scen_uncer_',uncer,'.feather'))
 }
 
 names<-data.frame(scen=runs,name=c("All","Additional water","Rainfall","Curve shape","Invasive density","Curve assignment","Age"))
