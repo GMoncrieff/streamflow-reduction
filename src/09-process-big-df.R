@@ -107,12 +107,12 @@ temp <- tbl(con, temp)
 
 
 #catchments ----
+
 #calculate catchment level reductions
 #first join pixel data (stream) to catchment data
 #then rescale pixel runoff to match catchment total
 #then calculate reductions for each pixel
 #then sum reductions for each catchment for each model run
-
 catchments <- stream %>% 
   mutate(PID2 = sql('CAST(PID AS INT64)'), SAMP2 = sql('CAST(SAMP AS INT64)')) %>%
   left_join(spdat,by='PID2') %>%
